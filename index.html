@@ -355,7 +355,8 @@ function startAudio(){
   }
   try{ A.ctx = new AC(); }catch(e){ return micError("Audio couldn't start in this browser."); }
   var ctxReady = A.ctx.resume ? A.ctx.resume() : Promise.resolve();
-  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}, video:false})
+  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}})
+  .catch(function(){ return navigator.mediaDevices.getUserMedia({audio:true}); }) // some browsers reject the detailed request
   .then(function(stream){
     return ctxReady.then(function(){
       A.sr = A.ctx.sampleRate; A.ringLen = Math.round(A.sr*3); A.ring = new Float32Array(A.ringLen);
@@ -369,7 +370,10 @@ function startAudio(){
     });
   })
   .catch(function(err){
-    micError(err && err.name === "NotAllowedError" ? "Microphone access was refused. Allow it in the browser's site settings, then reload." : "The microphone couldn't start (" + (err && err.name || "unknown error") + ").");
+    var raw = (err && (err.name + ": " + err.message)) || String(err);
+    micError((err && err.name === "NotAllowedError")
+      ? "The phone blocked the microphone. On Android open phone Settings > Apps > Chrome > Permissions > Microphone > Allow. On iPhone open Settings > Safari > Microphone > Ask. Then reload. (" + raw + ")"
+      : "The microphone couldn't start. Close any app using it (calls, recorders) and reload. (" + raw + ")");
   });
 }
 function micError(why){ $("micErr").hidden = false; $("micErrWhy").textContent = why; }
