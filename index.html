@@ -106,8 +106,16 @@ dd{margin:0;font-family:var(--num);font-variant-numeric:tabular-nums;text-align:
     <h1>Is this belt tight enough?</h1>
     <p>Pluck the belt like a guitar string with the phone close by. The phone hears the note, works out the tension and says whether to tighten it, loosen it or leave it.</p>
     <button class="btn" id="startBtn">Start listening</button>
-    <div class="warn" id="micErr" hidden><b>Can't use the microphone.</b> <span id="micErrWhy"></span></div>
+    <div class="warn" id="micErr" hidden>
+      <p style="margin:0 0 8px"><b>Can't use the microphone.</b> <span id="micErrWhy"></span></p>
+      <p style="margin:0 0 4px">To fix it, allow the microphone for your browser, then reload this page:</p>
+      <p style="margin:0 0 4px"><b>Android:</b> phone Settings → Apps → Chrome → Permissions → Microphone → Allow.</p>
+      <p style="margin:0 0 8px"><b>iPhone:</b> Settings → Safari → Microphone → Ask.</p>
+      <p style="margin:0;font-size:14px">Opened from WhatsApp or another app? Open the link in Chrome or Safari instead.</p>
+      <p style="margin:6px 0 0;font-size:12px;opacity:.7" id="micErrRaw"></p>
+    </div>
     <p class="note">No belt with you? After starting, tap <b>Play a test note</b>, hum a steady note, or pluck a rubber band stretched over a box.</p>
+    <p class="note">Use it to check belts on pumps, fans and workshop machines instead of tightening them by feel. Made for ED5518 Data Visualization for Engineers, IIT Madras.</p>
   </section>
 
   <!-- BELT VIEW -->
@@ -159,6 +167,16 @@ dd{margin:0;font-family:var(--num);font-variant-numeric:tabular-nums;text-align:
     </div>
 
     <p class="note">Tension comes from the note using string physics, the same way Gates' sonic tension meters work. Thick, stiff belts ring a little higher than a perfect string, so the app can read slightly tight. Results are only as good as the span and mass you enter.</p>
+
+    <details id="about">
+      <summary>Why this app exists</summary>
+      <div class="prose">
+        <p><b>The problem.</b> Belts on pumps, fans, AC blowers, conveyors and workshop machines are usually tightened by feel, pressing with a thumb. A loose belt slips, squeals and wears out. A tight belt overloads the bearings and shafts. Makers give a tension range, but checking it normally needs a dedicated sonic tension meter.</p>
+        <p><b>The idea.</b> A plucked belt rings like a guitar string, and its note depends on its tension. The phone's microphone hears the note, so any phone can do the job of that meter. The same app works for bicycle spokes, guy wires and cables.</p>
+        <p><b>How it follows ED5518.</b> The screen starts from the decision (tighten, OK or loosen) in one big word. Every pluck sits as a dot on one common tension scale against the maker's range, with one highlight colour for the newest reading and grey for the rest. The spectrum bars start from zero. The limits and the expected measurement error are stated, and the readings were checked against known physics (a hanging weight and a known test note), not just against looking right.</p>
+        <p>Made by Ojas Jitendra Patil (CH24B078) for ED5518 Data Visualization for Engineers, IIT Madras.</p>
+      </div>
+    </details>
 
     <details>
       <summary>Readings and how it works</summary>
@@ -371,9 +389,8 @@ function startAudio(){
   })
   .catch(function(err){
     var raw = (err && (err.name + ": " + err.message)) || String(err);
-    micError((err && err.name === "NotAllowedError")
-      ? "The phone blocked the microphone. On Android open phone Settings > Apps > Chrome > Permissions > Microphone > Allow. On iPhone open Settings > Safari > Microphone > Ask. Then reload. (" + raw + ")"
-      : "The microphone couldn't start. Close any app using it (calls, recorders) and reload. (" + raw + ")");
+    micError((err && err.name === "NotAllowedError") ? "The phone or browser blocked it." : "Another app may be using it (a call or a recorder). Close it and reload, or follow the steps below.");
+    $("micErrRaw").textContent = "Details: " + raw;
   });
 }
 function micError(why){ $("micErr").hidden = false; $("micErrWhy").textContent = why; }
