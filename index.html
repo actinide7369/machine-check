@@ -114,7 +114,7 @@ dd{margin:0;font-family:var(--num);font-variant-numeric:tabular-nums;text-align:
       <p style="margin:0;font-size:14px">Opened from WhatsApp or another app? Open the link in Chrome or Safari instead.</p>
       <p style="margin:6px 0 0;font-size:12px;opacity:.7" id="micErrRaw"></p>
     </div>
-    <p class="note">No belt with you? After starting, tap <b>Play a test note</b>, hum a steady note, or pluck a rubber band stretched over a box.</p>
+    <p class="note">No belt with you? Play a known tone near the phone (search "online tone generator" on a laptop and pick 220 Hz) and check the app hears the same note.</p>
     <p class="note">Use it to check belts on pumps, fans and workshop machines instead of tightening them by feel. Made for ED5518 Data Visualization for Engineers, IIT Madras.</p>
   </section>
 
@@ -159,11 +159,12 @@ dd{margin:0;font-family:var(--num);font-variant-numeric:tabular-nums;text-align:
     </div>
 
     <div class="card">
-      <h2>Check the app works (no belt needed)</h2>
-      <p class="sub">The phone plays a pluck of a known note through its speaker and checks it hears the same note. Turn the volume up.</p>
-      <button class="btn secondary" id="selfBtn">Play a test note</button>
-      <p class="selfres" id="selfRes"></p>
-      <p class="note">You can also hum a steady note, or pluck a rubber band stretched over an open box. These won't give a real belt tension, but they show the listening works.</p>
+      <h2>Check it with a known tone (no belt needed)</h2>
+      <p class="sub">On a laptop or second phone, search "online tone generator", pick a tone between 30 and 1500 Hz (220 Hz works well) and play it near this phone. Type the same number here.</p>
+      <div class="fields">
+        <div class="field"><label for="kTone">Tone you are playing (Hz)</label><input id="kTone" type="number" inputmode="decimal" step="any" value="220"></div>
+      </div>
+      <p class="selfres" id="selfRes">Play the tone and the result appears here.</p>
     </div>
 
     <p class="note">Tension comes from the note using string physics, the same way Gates' sonic tension meters work. Thick, stiff belts ring a little higher than a perfect string, so the app can read slightly tight. Results are only as good as the span and mass you enter.</p>
@@ -328,7 +329,17 @@ function analyseArray(x, sr, pre){
     var h1 = refine(f, spectrumOf(a1, sr)), h2 = refine(f, spectrumOf(a2, sr));
     split = Math.abs(h1 - h2)/f; steady = split < 0.005;
   }
-  return {f: steady ? f : null, unsteady: !steady, split: split, fYin: r.f, ap: r.ap, clarity: Math.max(0, 1 - r.ap), spec: spec, rms: rms, hum: hum};
+  // a real note must show its own lowest note, or at least two of its next overtones; otherwise YIN
+  // has locked onto a fraction of a sound that is too high for a belt (e.g. 8220 Hz read as 8220/6)
+  var mx = 0, kmax = 0; for(i=Math.ceil(20/spec.df); i<spec.mag.length; i++) if(spec.mag[i] > mx){ mx = spec.mag[i]; kmax = i; }
+  var fPeak = kmax*spec.df, tooHigh = null;
+  if(f && steady){
+    var near = function(fq){ var c = Math.round(fq/spec.df), m = 0; for(var q=c-3;q<=c+3;q++) if(q>0 && q<spec.mag.length && spec.mag[q] > m) m = spec.mag[q]; return m > 0.05*mx; };
+    var count = 0; for(var hh=2; hh<=4; hh++) if(near(f*hh)) count++;
+    if(!near(f) && count < 2) f = null;
+  }
+  if(!f && fPeak > FMAX) tooHigh = fPeak;
+  return {f: steady ? f : null, tooHigh: tooHigh, unsteady: !steady, split: split, fYin: r.f, ap: r.ap, clarity: Math.max(0, 1 - r.ap), spec: spec, rms: rms, hum: hum};
 }
 /* Fine-tune the YIN estimate: find each of the first six overtone peaks in the spectrum
    (parabolic fit on log magnitude), divide by its overtone number, and average weighted by
@@ -402,7 +413,12 @@ function onBlock(d){
   A.level = rms;
   if(A.floor == null) A.floor = Math.max(rms, 1e-5);
   var thr = Math.max(5*A.floor, 0.003);
-  if(!A.pending && rms > thr && rms > 2.5*Math.min(A.prev[0], A.prev[1]) && base - A.lastOnset > 0.35*A.sr){
+  var sustained = !A.pending && S.view === "belt" && rms > thr && base - A.lastOnset > 1.0*A.sr && rms >= 0.6*(A.onsetRms || 0);
+  if(sustained){
+    A.lastOnset = base; A.onsetRms = rms;
+    A.pending = {start: base, end: base + NWIN, onset: base, sustained: true};
+  } else if(!A.pending && rms > thr && rms > 2.5*Math.min(A.prev[0], A.prev[1]) && base - A.lastOnset > 0.35*A.sr){
+    A.onsetRms = rms;
     var lim = Math.max(2*rms, 0.002)*0.5, k = 0;
     for(k=0;k<n;k++) if(Math.abs(d[k]) > lim) break;
     var on = base + Math.min(k, n-1), skip = Math.round(0.04*A.sr);
@@ -421,7 +437,7 @@ function readSeg(start, n){
 }
 function analyseSegment(p){
   var preLen = Math.round(0.3*A.sr), preStart = p.onset - preLen - Math.round(0.02*A.sr);
-  var pre = preStart > 0 && A.total - preStart < A.ringLen ? readSeg(preStart, preLen) : null;
+  var pre = !p.sustained && preStart > 0 && A.total - preStart < A.ringLen ? readSeg(preStart, preLen) : null; // a steady tone isn't hum
   var r = analyseArray(readSeg(p.start, NWIN), A.sr, pre);
   handleResult(r);
 }
@@ -446,7 +462,7 @@ function handleResult(r){
     }
     renderAll(); return;
   }
-  if(!r.f){ S.missed = r.time; renderAll(); return; }
+  if(!r.f){ S.missed = r.time; S.tooHigh = r.tooHigh; renderAll(); return; }
   if(S.view === "belt"){
     var b = beltSettings();
     var T = (b.span && b.mu) ? tension(r.f, b.span, b.mu) : null;
@@ -495,7 +511,9 @@ function setStatus(prefix, cls, word, say, long){
 }
 function renderBelt(){
   var b = beltSettings(), last = S.belt[S.belt.length-1];
-  if(S.missed && (!last || S.missed > last.time)){
+  if(S.missed && S.tooHigh && (!last || S.missed > last.time)){
+    setStatus("b", "", "TOO HIGH", "That sound is about " + Math.round(S.tooHigh) + " Hz. Belts ring between 25 and 1500 Hz, so this can't be a belt. Try a lower tone, like 220 Hz.", true);
+  } else if(S.missed && (!last || S.missed > last.time)){
     setStatus("b", "", "PLUCK AGAIN", "Didn't catch a clear note. Pluck a bit harder, near the middle of the span, away from other noise.", true);
   } else if(!last){
     setStatus("b", "", "PLUCK IT", "Flick the belt in the middle of the span with the phone 1 to 2 cm away.", true);
@@ -510,6 +528,11 @@ function renderBelt(){
   }
   drawHist(b);
   drawSpec();
+  var kt = num("kTone"), sr2 = $("selfRes");
+  if(S.missed && S.tooHigh && (!last || S.missed > last.time)){ sr2.className = "selfres fail"; sr2.textContent = "Heard about " + Math.round(S.tooHigh) + " Hz, which is above the 1500 Hz limit. Pick a lower tone."; }
+  else if(last && kt){ var e2 = (last.f - kt)/kt*100;
+    sr2.className = "selfres " + (Math.abs(e2) < 1 ? "pass" : "fail");
+    sr2.textContent = "Heard " + last.f.toFixed(1) + " Hz. Your tone is " + kt + " Hz, so it's " + (Math.abs(e2) < 0.05 ? "exact" : (e2 > 0 ? "+" : "") + e2.toFixed(2) + "% off") + "." + (Math.abs(e2) < 1 ? "" : " Check the tone number, or move closer to the speaker."); }
   var r = S.last;
   $("dF").textContent = r && r.f ? r.f.toFixed(2) + " Hz" : "–";
   $("dClar").textContent = r ? Math.round(r.clarity*100) + "%" : "–";
@@ -629,7 +652,7 @@ function weighHelper(lenId, gId, outId, targetId){
   };
   $(lenId).addEventListener("input", f); $(gId).addEventListener("input", f);
 }
-var INPUTS = ["bSpan","bMu","bMin","bMax","aLen","aMu","aMass","wLenA","wGA","wLenB","wGB"];
+var INPUTS = ["kTone","bSpan","bMu","bMin","bMax","aLen","aMu","aMass","wLenA","wGA","wLenB","wGB"];
 function saveInputs(){ var o = {}; INPUTS.forEach(function(id){ o[id] = $(id).value; }); store.set("tc.inputs", o); }
 function loadInputs(){ var o = store.get("tc.inputs"); if(!o) return; INPUTS.forEach(function(id){ if(o[id] != null) $(id).value = o[id]; }); }
 function checkExample(){ var d = {bSpan:"400", bMu:"110", bMin:"150", bMax:"220"};
@@ -672,7 +695,6 @@ loadInputs(); checkExample();
 INPUTS.forEach(function(id){ $(id).addEventListener("input", function(){ saveInputs(); checkExample(); renderAll(); }); });
 weighHelper("wLenB","wGB","wOutB","bMu"); weighHelper("wLenA","wGA","wOutA","aMu");
 $("startBtn").addEventListener("click", startAudio);
-$("selfBtn").addEventListener("click", playTestNote);
 $("tab-belt").addEventListener("click", function(){ setView("belt"); });
 $("tab-acc").addEventListener("click", function(){ setView("acc"); });
 $("csvBtn").addEventListener("click", exportCsv); $("csvBtn2").addEventListener("click", exportCsv);
