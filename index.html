@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Machine Vibration Check</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Phone app that checks whether a machine is shaking more than its own normal, plus a level check.">
+<style>
+/* Layout: one narrow column, status first, charts below, detail folded away. Tokens below; no external files. */
+:root{
+  --bg:#edf0f1; --surface:#ffffff; --fg:#141e25; --muted:#56636c; --line:#d3d9dc; --mark:#aeb8be; --accent:#1c5fd0;
+  --ok:#1d7443; --ok-bg:#dff0e5; --watch:#8f5c00; --watch-bg:#f8ecd3; --bad:#b0261e; --bad-bg:#f9e0dc; --idle:#3d4a53; --idle-bg:#e1e7ea;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --num:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace;
+  --r:14px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0d1215; --surface:#151c21; --fg:#e6ecef; --muted:#97a3ab; --line:#29333a; --mark:#4b5862; --accent:#72a6ff;
+  --ok:#62d08d; --ok-bg:#11281b; --watch:#efb34d; --watch-bg:#2c2310; --bad:#ff7d73; --bad-bg:#331613; --idle:#c3ccd2; --idle-bg:#1c242a;
+  color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --bg:#0d1215; --surface:#151c21; --fg:#e6ecef; --muted:#97a3ab; --line:#29333a; --mark:#4b5862; --accent:#72a6ff;
+  --ok:#62d08d; --ok-bg:#11281b; --watch:#efb34d; --watch-bg:#2c2310; --bad:#ff7d73; --bad-bg:#331613; --idle:#c3ccd2; --idle-bg:#1c242a;
+  color-scheme:dark; }
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:16px/1.45 var(--sans);-webkit-text-size-adjust:100%}
+[hidden]{display:none!important}
+.wrap{max-width:560px;margin:0 auto;padding-block:12px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{font-weight:750;font-size:17px;letter-spacing:.01em}
+.brand small{display:block;font-weight:500;font-size:12px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.tabs{display:flex;background:var(--idle-bg);border-radius:999px;padding:3px}
+.tabs button{border:0;background:transparent;color:var(--muted);font:600 15px var(--sans);padding:8px 16px;border-radius:999px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+button:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.demo{background:var(--watch-bg);color:var(--watch);font-weight:700;font-size:14px;padding:8px 12px;border-radius:10px;text-align:center}
+
+/* status block */
+.status{border-radius:var(--r);padding:18px 18px 16px;background:var(--idle-bg);color:var(--idle)}
+.status .q{font-size:13px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;opacity:.85;margin:0 0 2px}
+.status .word{font-weight:850;line-height:.95;letter-spacing:-.01em;font-size:clamp(54px,19vw,92px);margin:0}
+.status .word.long{font-size:clamp(36px,11vw,56px);line-height:1.05}
+.status .say{font-size:19px;font-weight:600;margin:8px 0 0;color:var(--fg)}
+.status.ok{background:var(--ok-bg);color:var(--ok)}
+.status.watch{background:var(--watch-bg);color:var(--watch)}
+.status.bad{background:var(--bad-bg);color:var(--bad)}
+
+.btn{appearance:none;border:0;border-radius:12px;font:700 17px var(--sans);padding:14px 18px;cursor:pointer;background:var(--fg);color:var(--bg);min-height:52px}
+.btn.secondary{background:var(--surface);color:var(--fg);border:1.5px solid var(--line)}
+.btn.small{font-size:15px;padding:10px 14px;min-height:44px}
+.btn:disabled{opacity:.55;cursor:default}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.row > .btn{flex:1 1 auto}
+.note{font-size:14px;color:var(--muted);margin:0}
+
+.card{background:var(--surface);border-radius:var(--r);padding:14px 14px 10px;display:flex;flex-direction:column;gap:6px}
+.card h2{font-size:17px;margin:0;font-weight:700;text-wrap:balance}
+.card .sub{font-size:15px;margin:0;color:var(--muted)}
+.card .sub b{color:var(--fg);font-variant-numeric:tabular-nums}
+svg.chart{width:100%;height:auto;display:block}
+svg text{font-family:var(--sans)}
+
+.start{background:var(--surface);border-radius:var(--r);padding:22px 18px;display:flex;flex-direction:column;gap:14px}
+.start h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance}
+.start p{margin:0}
+.warn{background:var(--bad-bg);color:var(--fg);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.warn b{color:var(--bad)}
+
+details{background:var(--surface);border-radius:var(--r);padding:12px 14px}
+summary{font-weight:700;cursor:pointer;font-size:16px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:12px 0 4px;font-size:15px}
+dt{color:var(--muted)}
+dd{margin:0;font-family:var(--num);font-variant-numeric:tabular-nums;text-align:right;min-width:0;overflow-wrap:anywhere}
+.limits{font-size:14px;color:var(--muted);margin:10px 0 0}
+.limits p{margin:0 0 8px}
+
+/* level */
+.bubblebox{display:flex;justify-content:center}
+.bubblebox svg{width:min(78vw,300px);height:auto}
+.angles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.angle{background:var(--surface);border-radius:var(--r);padding:12px 14px}
+.angle .lab{font-size:13px;color:var(--muted);font-weight:650;letter-spacing:.04em;text-transform:uppercase}
+.angle .val{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:clamp(34px,10vw,46px);font-weight:700;line-height:1.1}
+.angle .hint{font-size:14px;color:var(--muted)}
+.calsteps{background:var(--surface);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:10px}
+.calsteps p{margin:0;font-size:16px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">Machine Check<small>Phone vibration test</small></div>
+    <div class="tabs" role="tablist" id="tabs" hidden>
+      <button role="tab" id="tab-vib" aria-selected="true">Vibration</button>
+      <button role="tab" id="tab-lvl" aria-selected="false">Level</button>
+    </div>
+  </header>
+
+  <div class="demo" id="demoBanner" hidden>DEMO: simulated data, not a real measurement</div>
+
+  <!-- start screen -->
+  <section class="start" id="startScreen">
+    <h1>Is this machine OK to keep running?</h1>
+    <p>Put your phone flat on the machine, screen up. The app learns how the machine shakes when it is healthy, then tells you if it starts shaking more.</p>
+    <button class="btn" id="startBtn">Start sensors</button>
+    <div class="warn" id="noData" hidden>
+      <p><b>No motion data reaching the app.</b> <span id="noDataWhy"></span></p>
+      <button class="btn secondary small" id="demoBtn">Try demo with simulated data</button>
+    </div>
+    <p class="note">Works in Chrome on Android and Safari on iPhone. The page needs an https:// link.</p>
+  </section>
+
+  <!-- vibration view -->
+  <section id="vibView" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div class="status" id="vStatus">
+      <p class="q">Keep running?</p>
+      <p class="word long" id="vWord">SET NORMAL</p>
+      <p class="say" id="vSay">Run the machine the way it runs when healthy, then tap Record normal.</p>
+    </div>
+
+    <div class="row">
+      <button class="btn" id="baseBtn">Record normal (10 s)</button>
+    </div>
+    <p class="note" id="baseNote">Do this once while the machine is running well. It is saved on this phone.</p>
+
+    <div class="card">
+      <h2>Shaking over the last minute</h2>
+      <p class="sub" id="trendSub">Now: <b>–</b></p>
+      <svg class="chart" id="trend" viewBox="0 0 340 206" role="img" aria-label="Shaking over the last minute"></svg>
+    </div>
+
+    <div class="card">
+      <h2>What speed is it shaking at?</h2>
+      <p class="sub" id="specSub">Collecting a few seconds of data…</p>
+      <svg class="chart" id="spec" viewBox="0 0 340 190" role="img" aria-label="Shaking by speed (frequency spectrum)"></svg>
+    </div>
+
+    <p class="note">A phone isn't a calibrated vibration meter, so this compares the machine only with its own normal. The 1.5× and 2.5× cut-offs are a rule of thumb that hasn't been tested on real machine failures.</p>
+
+    <details id="vDetails">
+      <summary>Readings and checks</summary>
+      <dl>
+        <dt>Samples per second</dt><dd id="dRate">–</dd>
+        <dt>Signal used</dt><dd id="dSrc">–</dd>
+        <dt>Shaking now (RMS, 3 s)</dt><dd id="dRms">–</dd>
+        <dt>Normal (RMS)</dt><dd id="dBase">–</dd>
+        <dt>Times normal</dt><dd id="dRatio">–</dd>
+        <dt>Strongest beat</dt><dd id="dPeak">–</dd>
+        <dt>Gravity check (should be ≈ 9.81)</dt><dd id="dGrav">–</dd>
+        <dt>Highest speed the phone can see</dt><dd id="dNyq">–</dd>
+      </dl>
+      <div class="row"><button class="btn secondary small" id="csvBtn">Export readings (CSV)</button>
+        <button class="btn secondary small" id="clearBtn">Forget normal</button></div>
+      <div class="limits">
+        <p>How it works: the phone's accelerometer with gravity removed. Each dot on the top chart is the RMS (average size) of the shaking over one second. The status uses the last 3 seconds divided by the normal you recorded. WATCH starts at 1.5× normal and INSPECT at 2.5×.</p>
+        <p>Limits: the phone samples about 60 times a second, so it only sees shaking up to about half that (30 Hz, or 1,800 per minute). Faster shaking can show up at a wrong, lower speed. Amplitude isn't calibrated, so the numbers can't be compared with standards like ISO 10816 or with another phone. A loose phone or a case can change the reading, so keep it in the same spot each time.</p>
+      </div>
+    </details>
+  </section>
+
+  <!-- level view -->
+  <section id="lvlView" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div class="status" id="lStatus">
+      <p class="q">Is it sitting level?</p>
+      <p class="word" id="lWord">–</p>
+      <p class="say" id="lSay">Lay the phone flat on the surface, screen up.</p>
+    </div>
+    <div class="bubblebox"><svg id="bubble" viewBox="-130 -130 260 260" role="img" aria-label="Bubble level"></svg></div>
+    <div class="angles">
+      <div class="angle"><div class="lab">Side to side</div><div class="val" id="lRoll">–</div><div class="hint" id="lRollHint"></div></div>
+      <div class="angle"><div class="lab">Front to back</div><div class="val" id="lPitch">–</div><div class="hint" id="lPitchHint"></div></div>
+    </div>
+    <div class="calsteps" id="calBox">
+      <p id="calText">Phones aren't perfectly flat. For best accuracy, calibrate once with the flip method.</p>
+      <div class="row">
+        <button class="btn secondary small" id="calBtn">Calibrate (flip)</button>
+        <button class="btn secondary small" id="zeroBtn">Set as zero</button>
+        <button class="btn secondary small" id="calReset">Reset</button>
+      </div>
+    </div>
+    <p class="note">LEVEL means both angles are within 0.5°. The bubble moves to the high side, like a spirit level. Use it to check a machine's base, since a machine that isn't level often shakes more.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+"use strict";
+/* ---------- constants ---------- */
+var WATCH = 1.5, INSPECT = 2.5;          // times normal (rule of thumb, unvalidated)
+var BASE_SECONDS = 10;
+var NOISE_FLOOR = 0.03;                 // m/s^2, rough phone noise; avoids dividing by ~0
+var HPF_HZ = 0.5;                       // removes gravity / drift, keeps 2 Hz taps
+var LEVEL_TOL = 0.5;                    // degrees
+var NFFT = 256;
+var KEEP = 9000;                        // samples kept (~2.5 min at 60 Hz)
+
+var now = function(){ return (window.__mcClock ? window.__mcClock() : performance.now()) / 1000; };
+var $ = function(id){ return document.getElementById(id); };
+var store = {
+  get:function(k){ try{ var v = localStorage.getItem(k); return v ? JSON.parse(v) : null; }catch(e){ return null; } },
+  set:function(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
+  del:function(k){ try{ localStorage.removeItem(k); }catch(e){} }
+};
+
+/* ---------- state ---------- */
+var S = {
+  started:false, gotData:false, demo:false, src:null,
+  t:[], vx:[], vy:[], vz:[], gx:[], gy:[], gz:[],
+  lastT:null, rawPrev:null, hp:[0,0,0], lp:null,
+  win:{t0:null, ss:0, n:0},
+  hist:[],                 // {t, rms}
+  base: store.get("mc.base"),   // {rms, peak, at}
+  rec:null,                // {t0, ss, n, wins:[]}
+  cal: store.get("mc.cal") || {roll:0, pitch:0},
+  calStep:0, calFirst:null,
+  view:"vib", lastSpec:null
+};
+
+/* ---------- motion input ---------- */
+function onMotion(e){
+  var a = e.acceleration, g = e.accelerationIncludingGravity;
+  var hasA = a && a.x != null && a.y != null && a.z != null;
+  var hasG = g && g.x != null && g.y != null && g.z != null;
+  if(!hasA && !hasG) return;
+  var t = now();
+  if(!S.gotData){ S.gotData = true; showMain(); }
+  var dt = S.lastT == null ? 1/60 : Math.min(0.1, Math.max(0.002, t - S.lastT));
+  if(S.lastT != null && t - S.lastT > 1.5){ resetFilters(); dt = 1/60; } // page was paused
+  S.lastT = t;
+
+  var raw = hasA ? [a.x, a.y, a.z] : [g.x, g.y, g.z];
+  S.src = hasA ? "linear" : "filtered";
+  // first-order high-pass on each axis (bilinear form, flat gain above the cut-off)
+  var K = Math.tan(Math.PI*HPF_HZ*dt), b0 = 1/(1+K), a1 = (K-1)/(K+1);
+  if(!S.rawPrev){ S.rawPrev = raw.slice(); }
+  for(var i=0;i<3;i++){ S.hp[i] = b0*(raw[i] - S.rawPrev[i]) - a1*S.hp[i]; }
+  S.rawPrev = raw.slice();
+
+  var G = hasG ? [g.x, g.y, g.z] : [NaN, NaN, NaN];
+  if(hasG){
+    var rcl = 1/(2*Math.PI*1.0), bl = dt/(rcl+dt);
+    if(!S.lp) S.lp = G.slice(); else for(var j=0;j<3;j++) S.lp[j] += bl*(G[j]-S.lp[j]);
+  }
+  push(t, S.hp[0], S.hp[1], S.hp[2], G[0], G[1], G[2]);
+
+  // 1-second RMS windows
+  var ss = S.hp[0]*S.hp[0] + S.hp[1]*S.hp[1] + S.hp[2]*S.hp[2];
+  var w = S.win;
+  if(w.t0 == null) w.t0 = t;
+  w.ss += ss; w.n++;
+  if(t - w.t0 >= 1){
+    var rms = Math.sqrt(w.ss / w.n);
+    S.hist.push({t:t, rms:rms});
+    if(S.hist.length > 180) S.hist.shift();
+    if(S.rec) S.rec.wins.push(rms);
+    w.t0 = t; w.ss = 0; w.n = 0;
+  }
+  if(S.rec){
+    S.rec.ss += ss; S.rec.n++;
+    if(t - S.rec.t0 >= BASE_SECONDS) finishBaseline();
+  }
+}
+function resetFilters(){ S.rawPrev = null; S.hp = [0,0,0]; S.win = {t0:null, ss:0, n:0}; }
+function push(t,a,b,c,d,e,f){
+  S.t.push(t); S.vx.push(a); S.vy.push(b); S.vz.push(c); S.gx.push(d); S.gy.push(e); S.gz.push(f);
+  if(S.t.length > KEEP + 600){
+    ["t","vx","vy","vz","gx","gy","gz"].forEach(function(k){ S[k] = S[k].slice(-KEEP); });
+  }
+}
+
+function sampleRate(){
+  var n = S.t.length; if(n < 20) return null;
+  var tEnd = S.t[n-1], i = n-1;
+  while(i > 0 && tEnd - S.t[i-1] <= 3) i--;
+  var span = tEnd - S.t[i]; if(span < 0.5) return null;
+  return (n-1-i)/span;
+}
+function rmsRecent(sec){
+  var h = S.hist, k = Math.min(sec, h.length); if(!k) return null;
+  var s = 0; for(var i=h.length-k;i<h.length;i++) s += h[i].rms*h[i].rms;
+  return Math.sqrt(s/k);
+}
+
+/* ---------- spectrum ---------- */
+function fft(re, im){
+  var n = re.length, i, j, k, l;
+  for(i=1, j=0; i<n; i++){
+    var bit = n >> 1; for(; j & bit; bit >>= 1) j ^= bit; j ^= bit;
+    if(i < j){ var tr = re[i]; re[i] = re[j]; re[j] = tr; var ti = im[i]; im[i] = im[j]; im[j] = ti; }
+  }
+  for(l=2; l<=n; l<<=1){
+    var ang = -2*Math.PI/l, wr = Math.cos(ang), wi = Math.sin(ang);
+    for(i=0; i<n; i+=l){
+      var cr = 1, ci = 0;
+      for(k=0; k<l/2; k++){
+        var ar = re[i+k+l/2]*cr - im[i+k+l/2]*ci, ai = re[i+k+l/2]*ci + im[i+k+l/2]*cr;
+        re[i+k+l/2] = re[i+k] - ar; im[i+k+l/2] = im[i+k] - ai;
+        re[i+k] += ar; im[i+k] += ai;
+        var nr = cr*wr - ci*wi; ci = cr*wi + ci*wr; cr = nr;
+      }
+    }
+  }
+}
+function spectrum(){
+  var n = S.t.length, fs = sampleRate();
+  if(n < NFFT || !fs) return null;
+  var w = new Array(NFFT), wsum = 0, i;
+  for(i=0;i<NFFT;i++){ w[i] = 0.5 - 0.5*Math.cos(2*Math.PI*i/(NFFT-1)); wsum += w[i]; }
+  var power = new Array(NFFT/2+1).fill(0);
+  [S.vx, S.vy, S.vz].forEach(function(arr){
+    var seg = arr.slice(n-NFFT), m = 0;
+    for(i=0;i<NFFT;i++) m += seg[i]; m /= NFFT;
+    var re = new Array(NFFT), im = new Array(NFFT).fill(0);
+    for(i=0;i<NFFT;i++) re[i] = (seg[i]-m)*w[i];
+    fft(re, im);
+    for(i=0;i<=NFFT/2;i++){ var amp = 2*Math.sqrt(re[i]*re[i]+im[i]*im[i])/wsum; power[i] += amp*amp; }
+  });
+  var amp = power.map(Math.sqrt), df = fs/NFFT;
+  var kMin = Math.max(1, Math.ceil(1.0/df)), best = kMin;
+  for(i=kMin;i<amp.length;i++) if(amp[i] > amp[best]) best = i;
+  // parabolic interpolation of the peak
+  var fk = best;
+  if(best > 0 && best < amp.length-1){
+    var y0 = amp[best-1], y1 = amp[best], y2 = amp[best+1], den = (y0 - 2*y1 + y2);
+    if(den !== 0) fk = best + 0.5*(y0 - y2)/den;
+  }
+  var sorted = amp.slice(kMin).sort(function(a,b){return a-b;});
+  var median = sorted[Math.floor(sorted.length/2)] || 0;
+  return {amp:amp, df:df, fs:fs, peakK:best, peakF:fk*df, peakAmp:amp[best], clear: amp[best] > 4*median && amp[best] > 0.004};
+}
+
+/* ---------- baseline ---------- */
+function startBaseline(){
+  if(!S.gotData) return;
+  S.rec = {t0:now(), ss:0, n:0, wins:[]};
+  $("baseBtn").disabled = true;
+}
+function finishBaseline(){
+  var r = S.rec; S.rec = null;
+  var rms = Math.sqrt(r.ss / Math.max(1, r.n));
+  var sp = spectrum();
+  var wins = r.wins.slice(1); // skip first partial window
+  var steady = true;
+  if(wins.length >= 3){
+    var mx = Math.max.apply(null, wins), mn = Math.min.apply(null, wins);
+    steady = mx <= 3*Math.max(mn, NOISE_FLOOR);
+  }
+  S.base = {rms:rms, peak: sp && sp.clear ? sp.peakF : null, at: Date.now(), steady: steady};
+  store.set("mc.base", S.base);
+  $("baseBtn").disabled = false;
+}
+function forgetBaseline(){ S.base = null; store.del("mc.base"); }
+
+/* ---------- status ---------- */
+function vibStatus(){
+  var cur = rmsRecent(3);
+  if(S.rec){
+    var left = Math.max(0, Math.ceil(BASE_SECONDS - (now() - S.rec.t0)));
+    return {cls:"", word:"LEARNING", long:false, say:"Recording normal shaking. Keep the phone still on the machine for " + left + " more seconds."};
+  }
+  if(!S.base) return {cls:"", word:"SET NORMAL", long:true, say:"Run the machine the way it runs when healthy, then tap Record normal."};
+  if(cur == null) return {cls:"", word:"WAIT", long:false, say:"Reading the first second of data."};
+  var ratio = cur / Math.max(S.base.rms, NOISE_FLOOR), x = ratio.toFixed(1) + "×";
+  if(ratio >= INSPECT) return {cls:"bad", word:"INSPECT", long:false, ratio:ratio, say:"Shaking is " + x + " its normal level. Get someone to inspect it before running much longer."};
+  if(ratio >= WATCH) return {cls:"watch", word:"WATCH", long:false, ratio:ratio, say:"Shaking is " + x + " its normal level. OK for now, but check again soon and tell whoever looks after it."};
+  return {cls:"ok", word:"OK", long:false, ratio:ratio, say:"Shaking is " + x + " its normal level. Fine to keep running."};
+}
+
+/* ---------- level ---------- */
+function levelAngles(){
+  if(!S.lp) return null;
+  var g = S.lp.slice();
+  if(g[2] < 0) g = g.map(function(v){return -v;}); // some browsers report the opposite sign
+  var roll = Math.atan2(g[0], Math.sqrt(g[1]*g[1]+g[2]*g[2]))*180/Math.PI;
+  var pitch = Math.atan2(g[1], Math.sqrt(g[0]*g[0]+g[2]*g[2]))*180/Math.PI;
+  var tilt = Math.acos(Math.min(1, g[2]/Math.hypot(g[0],g[1],g[2])))*180/Math.PI;
+  return {rawRoll:roll, rawPitch:pitch, roll:roll - S.cal.roll, pitch:pitch - S.cal.pitch, tilt:tilt};
+}
+function levelStatus(a){
+  if(!a) return {cls:"", word:"–", say:"Waiting for sensor data."};
+  if(a.tilt > 30) return {cls:"", word:"LAY FLAT", say:"Lay the phone flat on the surface, screen up."};
+  var r = a.roll, p = a.pitch;
+  if(Math.abs(r) <= LEVEL_TOL && Math.abs(p) <= LEVEL_TOL) return {cls:"ok", word:"LEVEL", say:"Both directions are within 0.5°."};
+  var tips = [];
+  if(Math.abs(r) >= Math.abs(p)) tips.push(r > 0 ? "Raise the left side" : "Raise the right side");
+  else tips.push(p > 0 ? "Raise the bottom end (charging port end)" : "Raise the top end");
+  return {cls:"watch", word:"ADJUST", say: tips[0] + " by " + Math.max(Math.abs(r),Math.abs(p)).toFixed(1) + "°."};
+}
+
+/* ---------- drawing ---------- */
+function nice(v){
+  if(!(v > 0)) return 1;
+  var e = Math.pow(10, Math.floor(Math.log10(v))), f = v/e;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 4 ? 4 : f <= 5 ? 5 : f <= 6 ? 6 : f <= 8 ? 8 : 10) * e;
+}
+function fmt(v){ if(v === 0) return "0"; return v >= 10 ? v.toFixed(0) : v >= 1 ? v.toFixed(1) : v >= 0.1 ? v.toFixed(2) : v.toFixed(3); }
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+
+function drawTrend(){
+  var W=340,H=206,L=40,R=74,T=20,B=26, pw=W-L-R, ph=H-T-B;
+  var tn = S.hist.length ? S.hist[S.hist.length-1].t : now();
+  var pts = S.hist.filter(function(h){ return h.t >= tn - 60; });
+  var dmax = pts.reduce(function(m,h){ return Math.max(m,h.rms); }, 0);
+  var refMax = S.base ? Math.max(S.base.rms, NOISE_FLOOR)*INSPECT*1.12 : 0;
+  var ymax = nice(Math.max(dmax*1.1, refMax, 0.05));
+  var X = function(t){ return L + pw*(1 - (tn - t)/60); };
+  var Y = function(v){ return T + ph*(1 - v/ymax); };
+  var s = "";
+  // grid + y ticks
+  [0, ymax/2, ymax].forEach(function(v){
+    s += '<line x1="'+L+'" x2="'+(L+pw)+'" y1="'+Y(v)+'" y2="'+Y(v)+'" stroke="var(--line)" stroke-width="1"/>';
+    s += '<text x="'+(L-6)+'" y="'+(Y(v)+4)+'" text-anchor="end" font-size="11" fill="var(--muted)">'+fmt(v)+'</text>';
+  });
+  s += '<text x="'+L+'" y="'+(H-4)+'" font-size="11" fill="var(--muted)">1 min ago</text>';
+  s += '<text x="'+(L+pw/2)+'" y="'+(H-4)+'" text-anchor="middle" font-size="11" fill="var(--muted)">30 s</text>';
+  s += '<text x="'+(L+pw)+'" y="'+(H-4)+'" text-anchor="end" font-size="11" fill="var(--muted)">now</text>';
+  s += '<text x="'+(L-6)+'" y="9" text-anchor="end" font-size="10.5" fill="var(--muted)">m/s²</text>';
+  // reference lines (grey), labelled on the chart
+  if(S.base){
+    var b = Math.max(S.base.rms, NOISE_FLOOR);
+    [[b,"Normal",""],[b*WATCH,"Watch 1.5×","5 4"],[b*INSPECT,"Inspect 2.5×","5 4"]].forEach(function(r, idx){
+      var y = Y(r[0]);
+      s += '<line x1="'+L+'" x2="'+(L+pw)+'" y1="'+y+'" y2="'+y+'" stroke="var(--muted)" stroke-width="'+(idx?1.2:1.6)+'"'+(r[2]?' stroke-dasharray="'+r[2]+'"':'')+'/>';
+      s += '<text x="'+(L+pw+5)+'" y="'+(y+4)+'" font-size="11" fill="var(--muted)">'+r[1]+'</text>';
+    });
+  }
+  // data: one highlight colour
+  if(pts.length){
+    var d = pts.map(function(h,i){ return (i?"L":"M")+X(h.t).toFixed(1)+" "+Y(h.rms).toFixed(1); }).join(" ");
+    s += '<path d="'+d+'" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round"/>';
+    pts.forEach(function(h){ s += '<circle cx="'+X(h.t).toFixed(1)+'" cy="'+Y(h.rms).toFixed(1)+'" r="2" fill="var(--accent)"/>'; });
+    var last = pts[pts.length-1];
+    s += '<circle cx="'+X(last.t).toFixed(1)+'" cy="'+Y(last.rms).toFixed(1)+'" r="4.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="1.5"/>';
+  } else {
+    s += '<text x="'+(L+pw/2)+'" y="'+(T+ph/2)+'" text-anchor="middle" font-size="12" fill="var(--muted)">Waiting for data</text>';
+  }
+  $("trend").innerHTML = s;
+  var cur = rmsRecent(1);
+  $("trendSub").innerHTML = cur == null ? "Now: <b>–</b>" :
+    "Now: <b>" + fmt(cur) + " m/s²</b>" + (S.base ? " &nbsp;Normal: <b>" + fmt(S.base.rms) + "</b>" : "") + " &nbsp;(one dot per second)";
+}
+
+function drawSpec(sp){
+  var W=340,H=190,L=40,R=10,T=26,B=34, pw=W-L-R, ph=H-T-B, s = "";
+  if(!sp){ $("spec").innerHTML = '<text x="170" y="95" text-anchor="middle" font-size="12" fill="var(--muted)">Collecting a few seconds of data</text>'; return; }
+  var nyq = sp.fs/2, K = sp.amp.length;
+  var ymax = nice(Math.max(sp.peakAmp*1.25, 0.01));
+  var X = function(f){ return L + pw*f/nyq; };
+  var Y = function(v){ return T + ph*(1 - v/ymax); };
+  [0, ymax/2, ymax].forEach(function(v){
+    s += '<line x1="'+L+'" x2="'+(L+pw)+'" y1="'+Y(v)+'" y2="'+Y(v)+'" stroke="var(--line)" stroke-width="1"/>';
+    s += '<text x="'+(L-6)+'" y="'+(Y(v)+4)+'" text-anchor="end" font-size="11" fill="var(--muted)">'+fmt(v)+'</text>';
+  });
+  var bw = Math.max(1, pw/(K-1) - 0.6);
+  for(var k=1;k<K;k++){
+    var x = X(k*sp.df) - bw/2, y = Y(sp.amp[k]), hgt = Math.max(0, T+ph - y);
+    var hi = sp.clear && k === sp.peakK;
+    s += '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(2)+'" height="'+hgt.toFixed(1)+'" fill="'+(hi?"var(--accent)":"var(--mark)")+'"/>';
+  }
+  var step = nyq > 40 ? 10 : 5;
+  for(var f=0; f<=nyq+0.01; f+=step){
+    s += '<text x="'+X(f)+'" y="'+(T+ph+14)+'" text-anchor="middle" font-size="11" fill="var(--muted)">'+f+'</text>';
+  }
+  s += '<text x="'+L+'" y="'+(H-3)+'" font-size="11" fill="var(--muted)">Hz (beats per second). Phone can\'t see above '+nyq.toFixed(0)+' Hz</text>';
+  s += '<text x="'+(L-6)+'" y="9" text-anchor="end" font-size="10.5" fill="var(--muted)">m/s²</text>';
+  if(S.base && S.base.peak && S.base.peak < nyq){
+    var bx = X(S.base.peak);
+    s += '<line x1="'+bx+'" x2="'+bx+'" y1="'+(T-2)+'" y2="'+(T+ph)+'" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>';
+    s += '<text x="'+(bx-4)+'" y="'+(T-6)+'" text-anchor="end" font-size="10.5" fill="var(--muted)">normal beat</text>';
+  }
+  if(sp.clear){
+    var px = Math.min(Math.max(X(sp.peakF), L+30), L+pw-30);
+    s += '<text x="'+px+'" y="'+(Y(sp.peakAmp)-6)+'" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent)">'+sp.peakF.toFixed(1)+' Hz</text>';
+  }
+  $("spec").innerHTML = s;
+  var sub;
+  if(!sp.clear) sub = "No single clear beat right now, just general noise.";
+  else {
+    sub = "Strongest beat: <b>" + sp.peakF.toFixed(1) + " Hz</b> (" + Math.round(sp.peakF*60).toLocaleString() + " per minute).";
+    if(S.base && S.base.peak){
+      var shift = Math.abs(sp.peakF - S.base.peak);
+      if(shift > 1 && shift/S.base.peak > 0.1) sub += " Normal was " + S.base.peak.toFixed(1) + " Hz, so the main beat has moved.";
+      else sub += " Same as normal.";
+    }
+  }
+  $("specSub").innerHTML = sub;
+}
+
+function drawBubble(a){
+  var R = 112, MAXD = 5, s = "";
+  s += '<circle cx="0" cy="0" r="'+R+'" fill="var(--surface)" stroke="var(--line)" stroke-width="2"/>';
+  s += '<line x1="-'+R+'" x2="'+R+'" y1="0" y2="0" stroke="var(--line)"/><line y1="-'+R+'" y2="'+R+'" x1="0" x2="0" stroke="var(--line)"/>';
+  [1,2.5].forEach(function(d){ s += '<circle r="'+(R*d/MAXD)+'" fill="none" stroke="var(--line)" stroke-dasharray="3 4"/>'; });
+  s += '<circle r="'+(R*LEVEL_TOL/MAXD)+'" fill="none" stroke="var(--muted)" stroke-width="1.5"/>';
+  s += '<text x="4" y="'+(-R*2.5/MAXD-4)+'" font-size="10" fill="var(--muted)">2.5°</text>';
+  s += '<text x="4" y="'+(-R+14)+'" font-size="10" fill="var(--muted)">5°</text>';
+  if(a && a.tilt <= 30){
+    var cl = function(v){ return Math.max(-MAXD, Math.min(MAXD, v)); };
+    var bx = R*cl(a.roll)/MAXD, by = -R*cl(a.pitch)/MAXD;
+    var mag = Math.hypot(bx,by); if(mag > R-14){ bx *= (R-14)/mag; by *= (R-14)/mag; }
+    s += '<circle cx="'+bx.toFixed(1)+'" cy="'+by.toFixed(1)+'" r="13" fill="var(--accent)" opacity=".9"/>';
+  }
+  $("bubble").innerHTML = s;
+}
+
+function setStatus(boxId, wordId, sayId, st){
+  var box = $(boxId);
+  box.className = "status" + (st.cls ? " " + st.cls : "");
+  $(wordId).textContent = st.word;
+  $(wordId).className = "word" + (st.long ? " long" : "");
+  $(sayId).textContent = st.say;
+}
+
+function render(){
+  if(!S.gotData) return;
+  if(S.view === "vib"){
+    setStatus("vStatus","vWord","vSay", vibStatus());
+    drawTrend();
+    var sp = spectrum(); S.lastSpec = sp; drawSpec(sp);
+    var fs = sampleRate();
+    $("dRate").textContent = fs ? fs.toFixed(1) + " /s" : "–";
+    $("dSrc").textContent = S.src === "linear" ? "gravity removed by phone" : "gravity filtered out in app";
+    var c = rmsRecent(3); $("dRms").textContent = c == null ? "–" : c.toFixed(3) + " m/s²";
+    $("dBase").textContent = S.base ? S.base.rms.toFixed(3) + " m/s²" : "not set";
+    $("dRatio").textContent = (S.base && c != null) ? (c/Math.max(S.base.rms,NOISE_FLOOR)).toFixed(2) + "×" : "–";
+    $("dPeak").textContent = sp && sp.clear ? sp.peakF.toFixed(2) + " Hz" : "none clear";
+    $("dGrav").textContent = gravityCheck();
+    $("dNyq").textContent = fs ? (fs/2).toFixed(1) + " Hz" : "–";
+    if(!S.rec){
+      $("baseBtn").textContent = S.base ? "Record normal again" : "Record normal (10 s)";
+      var note = "Do this once while the machine is running well. It is saved on this phone.";
+      if(S.base){
+        var d = new Date(S.base.at);
+        note = "Normal saved " + d.toLocaleDateString(undefined,{day:"numeric",month:"short"}) + ", " + d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}) + ".";
+        if(S.base.steady === false) note += " Readings jumped around while recording. Keep the phone still and record again.";
+        else if(S.base.rms < 0.05) note += " This normal is very small, close to the phone's own noise. Was the machine running?";
+      }
+      $("baseNote").textContent = note;
+    } else {
+      $("baseBtn").textContent = "Recording… " + Math.max(0, Math.ceil(BASE_SECONDS - (now() - S.rec.t0))) + " s";
+    }
+  } else {
+    var a = levelAngles();
+    var st = levelStatus(a);
+    setStatus("lStatus","lWord","lSay", st);
+    drawBubble(a);
+    if(a){
+      $("lRoll").textContent = Math.abs(a.roll).toFixed(1) + "°";
+      $("lPitch").textContent = Math.abs(a.pitch).toFixed(1) + "°";
+      $("lRollHint").textContent = Math.abs(a.roll) <= LEVEL_TOL ? "level" : (a.roll > 0 ? "right side high" : "left side high");
+      $("lPitchHint").textContent = Math.abs(a.pitch) <= LEVEL_TOL ? "level" : (a.pitch > 0 ? "top end high" : "bottom end high");
+    }
+  }
+}
+function gravityCheck(){
+  var n = S.t.length; if(!n || isNaN(S.gx[n-1])) return "–";
+  var s = 0, c = 0, tEnd = S.t[n-1];
+  for(var i=n-1;i>=0 && tEnd - S.t[i] <= 1;i--){ s += Math.hypot(S.gx[i],S.gy[i],S.gz[i]); c++; }
+  return (s/c).toFixed(2) + " m/s²";
+}
+
+/* ---------- calibration ---------- */
+function calClick(){
+  var a = levelAngles(); if(!a) return;
+  if(S.calStep === 0){
+    S.calStep = 1;
+    $("calText").textContent = "Step 1 of 2: put the phone flat where you want to measure, wait 2 seconds, then tap Take reading 1.";
+    $("calBtn").textContent = "Take reading 1";
+  } else if(S.calStep === 1){
+    S.calFirst = {roll:a.rawRoll, pitch:a.rawPitch}; S.calStep = 2;
+    $("calText").textContent = "Step 2 of 2: turn the phone round 180° on the same spot (top end where the bottom was), wait 2 seconds, then tap Take reading 2.";
+    $("calBtn").textContent = "Take reading 2";
+  } else {
+    // rotating 180° flips the true angle but not the phone's own offset
+    S.cal = {roll:(S.calFirst.roll + a.rawRoll)/2, pitch:(S.calFirst.pitch + a.rawPitch)/2};
+    var trueRoll = (S.calFirst.roll - a.rawRoll)/2, truePitch = (S.calFirst.pitch - a.rawPitch)/2;
+    store.set("mc.cal", S.cal); S.calStep = 0;
+    $("calText").textContent = "Calibrated. Phone offset was " + S.cal.roll.toFixed(2) + "° side to side and " + S.cal.pitch.toFixed(2) + "° front to back. The surface itself is tilted " + Math.abs(trueRoll).toFixed(2) + "° and " + Math.abs(truePitch).toFixed(2) + "°.";
+    $("calBtn").textContent = "Calibrate (flip)";
+  }
+}
+function zeroHere(){
+  var a = levelAngles(); if(!a) return;
+  S.cal = {roll:a.rawRoll, pitch:a.rawPitch}; store.set("mc.cal", S.cal); S.calStep = 0;
+  $("calBtn").textContent = "Calibrate (flip)";
+  $("calText").textContent = "Zero set. This surface now reads 0°. Only do this on a surface you know is level.";
+}
+function calReset(){
+  S.cal = {roll:0, pitch:0}; store.del("mc.cal"); S.calStep = 0;
+  $("calBtn").textContent = "Calibrate (flip)";
+  $("calText").textContent = "Calibration cleared. Readings are straight from the sensor.";
+}
+
+/* ---------- CSV ---------- */
+function exportCsv(){
+  var fs = sampleRate(), lines = [];
+  lines.push("# Machine Vibration Check export," + new Date().toISOString());
+  lines.push("# sample_rate_hz," + (fs ? fs.toFixed(2) : ""));
+  lines.push("# normal_rms_m_s2," + (S.base ? S.base.rms.toFixed(5) : ""));
+  lines.push("# signal," + (S.src === "linear" ? "acceleration (gravity removed by phone) then 0.5 Hz high-pass" : "accelerationIncludingGravity with 0.5 Hz high-pass"));
+  lines.push("time_s,vib_x_m_s2,vib_y_m_s2,vib_z_m_s2,g_x_m_s2,g_y_m_s2,g_z_m_s2");
+  var t0 = S.t[0] || 0;
+  for(var i=0;i<S.t.length;i++){
+    lines.push([(S.t[i]-t0).toFixed(4), S.vx[i].toFixed(5), S.vy[i].toFixed(5), S.vz[i].toFixed(5),
+      isNaN(S.gx[i])?"":S.gx[i].toFixed(4), isNaN(S.gy[i])?"":S.gy[i].toFixed(4), isNaN(S.gz[i])?"":S.gz[i].toFixed(4)].join(","));
+  }
+  lines.push(""); lines.push("time_s,rms_1s_m_s2");
+  S.hist.forEach(function(h){ lines.push((h.t-t0).toFixed(2) + "," + h.rms.toFixed(5)); });
+  var csv = lines.join("\n"), name = "vibration-" + new Date().toISOString().slice(0,19).replace(/[:T]/g,"-") + ".csv";
+  var file;
+  try{ file = new File([csv], name, {type:"text/csv"}); }catch(e){}
+  if(file && navigator.canShare && navigator.canShare({files:[file]})){
+    navigator.share({files:[file], title:name}).catch(function(){ download(csv, name); });
+  } else download(csv, name);
+}
+function download(csv, name){
+  var url = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
+  var a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1500);
+}
+
+/* ---------- start / no data / demo ---------- */
+var loopOn = false, wake = null;
+function loop(){ render(); requestAnimationFrame(loop); }
+function showMain(){
+  $("startScreen").hidden = true; $("tabs").hidden = false;
+  setView(S.view);
+  if(!loopOn){ loopOn = true; requestAnimationFrame(loop); }
+}
+function setView(v){
+  S.view = v;
+  $("vibView").hidden = v !== "vib"; $("lvlView").hidden = v !== "lvl";
+  $("tab-vib").setAttribute("aria-selected", v === "vib"); $("tab-lvl").setAttribute("aria-selected", v === "lvl");
+}
+function noData(why){
+  $("noData").hidden = false; $("noDataWhy").textContent = why;
+  $("startBtn").textContent = "Try again";
+}
+function keepAwake(){
+  try{ if(navigator.wakeLock && document.visibilityState === "visible") navigator.wakeLock.request("screen").then(function(w){ wake = w; }).catch(function(){}); }catch(e){}
+}
+function start(){
+  $("noData").hidden = true;
+  if(typeof DeviceMotionEvent === "undefined"){ noData("This browser has no motion sensor support. Open the link on a phone."); return; }
+  if(!window.isSecureContext){ noData("The page must be opened from an https:// link for the phone to share sensor data."); return; }
+  var refused = false;
+  if(!S.started){ window.addEventListener("devicemotion", onMotion); S.started = true; }
+  keepAwake();
+  // iOS needs permission requested directly inside the tap. Data arriving is what counts.
+  if(typeof DeviceMotionEvent.requestPermission === "function"){
+    try{
+      DeviceMotionEvent.requestPermission().then(function(r){ if(r !== "granted") refused = true; }).catch(function(){ refused = true; });
+    }catch(e){}
+  }
+  setTimeout(function(){
+    if(S.gotData) return;
+    if(refused) noData("Motion access was refused. Close the tab, reopen the link, tap Start and choose Allow.");
+    else noData("If you're on a laptop, open the link on your phone instead. On iPhone, allow Motion & Orientation access when asked.");
+  }, 2000);
+}
+function startDemo(){
+  S.demo = true; $("demoBanner").hidden = false;
+  var t0 = performance.now(), ph = 0;
+  setInterval(function(){
+    var t = (performance.now() - t0)/1000;
+    // healthy for 25 s, then a slowly growing imbalance at the same 24 Hz beat
+    var grow = t < 25 ? 1 : Math.min(3.4, 1 + (t-25)/8);
+    var A = 0.12*grow, n = function(){ return (Math.random()-0.5)*0.05; };
+    ph += 2*Math.PI*24*(1/60);
+    var vx = A*Math.sin(ph) + n(), vy = 0.6*A*Math.cos(ph) + n(), vz = 0.3*A*Math.sin(ph+1) + n();
+    var tilt = 1.2*Math.PI/180;
+    onMotion({acceleration:{x:vx,y:vy,z:vz}, accelerationIncludingGravity:{x:9.81*Math.sin(tilt)+vx, y:0.3+vy, z:9.81*Math.cos(tilt)+vz}});
+  }, 1000/60);
+}
+
+$("startBtn").addEventListener("click", start);
+$("demoBtn").addEventListener("click", startDemo);
+$("baseBtn").addEventListener("click", startBaseline);
+$("clearBtn").addEventListener("click", forgetBaseline);
+$("csvBtn").addEventListener("click", exportCsv);
+$("tab-vib").addEventListener("click", function(){ setView("vib"); });
+$("tab-lvl").addEventListener("click", function(){ setView("lvl"); });
+$("calBtn").addEventListener("click", calClick);
+$("zeroBtn").addEventListener("click", zeroHere);
+$("calReset").addEventListener("click", calReset);
+document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "visible" && S.started) keepAwake(); });
+
+// hooks for automated tests only
+window.MC = {S:S, onMotion:onMotion, spectrum:spectrum, vibStatus:vibStatus, levelAngles:levelAngles, levelStatus:levelStatus, render:render, startBaseline:startBaseline, setView:setView, calClick:calClick, sampleRate:sampleRate};
+})();
+</script>
+</body>
+</html>
